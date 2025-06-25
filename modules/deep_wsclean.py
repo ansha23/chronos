@@ -26,42 +26,55 @@ def run_deep_wsclean(config):
             ms_basename = ms_basename[:-3]
         output_prefix = ms_basename + '_uvsubwsc'
 
-    scale = config.get(section, 'scale')
-    size = config.get(section, 'size')
-    niter = config.get(section, 'niter')
-    mgain = config.get(section, 'mgain')
     wsclean_path = config.get('general', 'wsclean_path', fallback='wsclean')
+
+    size = config.get(section, 'size')
+    scale = config.get(section, 'scale')
+    channels_out = config.get(section, 'channels-out')
+    kernel_size = config.get(section, 'wstack-kernel-size')
+    oversampling = config.get(section, 'wstack-oversampling')
+    pol = config.get(section, 'pol')
+    data_column = config.get(section, 'data-column')
+    niter = config.get(section, 'niter')
+    auto_mask = config.get(section, 'auto-mask')
+    auto_threshold = config.get(section, 'auto-threshold')
+    gain = config.get(section, 'gain')
+    mgain = config.get(section, 'mgain')
+    scale_bias = config.get(section, 'multiscale-scale-bias')
+    spectral_pol = config.get(section, 'fit-spectral-pol')
+    padding = config.get(section, 'padding')
+    parallel_deconv = config.get(section, 'parallel-deconvolution')
 
     cmd = [
         wsclean_path,
         '-name', output_prefix,
+        '-weight', 'briggs', '0.0',
+        '-super-weight', '1.0',
+        '-weighting-rank-filter-size', '16',
+        '-taper-gaussian', '0',
         '-size', *size.split(','),
         '-scale', scale,
+        '-channels-out', channels_out,
+        '-wstack-grid-mode', 'kb',
+        '-wstack-kernel-size', kernel_size,
+        '-wstack-oversampling', oversampling,
+        '-pol', pol,
+        '-data-column', data_column,
         '-niter', niter,
+        '-auto-mask', auto_mask,
+        '-auto-threshold', auto_threshold,
+        '-gain', gain,
         '-mgain', mgain,
+        '-join-channels',
+        '-no-negative',
+        '-multiscale-scale-bias', scale_bias,
+        '-fit-spectral-pol', spectral_pol,
+        '-fit-beam',
+        '-elliptical-beam',
+        '-padding', padding,
+        '-parallel-deconvolution', parallel_deconv,
+        ms
     ]
-
-    channels_out = config.get(section, 'channels-out', fallback='').strip()
-    if channels_out:
-        cmd += ['-channels-out', channels_out]
-
-    pol = config.get(section, 'pol', fallback='').strip()
-    if pol:
-        cmd += ['-pol', pol]
-
-    weight = config.get(section, 'weight', fallback='').strip()
-    if weight:
-        cmd += ['-weight'] + weight.split() 
-
-    super_weight = config.get(section, 'super-weight', fallback='').strip()
-    if super_weight:
-        cmd += ['-super-weight', super_weight]
-
-    rank_filter = config.get(section, 'weighting-rank-filter-size', fallback='').strip()
-    if rank_filter:
-        cmd += ['-weighting-rank-filter-size', rank_filter]
-
-    cmd.append(ms)
 
     logger.info(f" Running WSClean with command:\n{' '.join(cmd)}")
 

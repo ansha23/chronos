@@ -5,25 +5,16 @@ from casacore.tables import table
 import numpy as np
 
 def get_total_scan_duration(ms_path, scan_str=None):
-    """Compute total duration by summing durations of each selected scan."""
     try:
         tb = table(ms_path, ack=False)
         times = tb.getcol("TIME")
         scan_ids = tb.getcol("SCAN_NUMBER")
         tb.close()
 
-        if scan_str:
-            scan_numbers = list(map(int, scan_str.strip().split()))
-        else:
-            scan_numbers = sorted(set(scan_ids))
+        scan_numbers = list(map(int, scan_str.strip().split())) if scan_str else sorted(set(scan_ids))
 
-        total_duration = 0
-        for scan in scan_numbers:
-            scan_times = times[scan_ids == scan]
-            if len(scan_times) > 0:
-                duration = np.max(scan_times) - np.min(scan_times)
-                total_duration += duration
-
+        total_duration = sum(np.max(times[scan_ids == scan]) - np.min(times[scan_ids == scan]) 
+                             for scan in scan_numbers if len(times[scan_ids == scan]) > 0)
         return total_duration
     except Exception as e:
         logger.error(f"❌ Failed to compute total scan duration: {e}")
@@ -48,49 +39,60 @@ def run_time_wsclean(config):
     if not name:
         ms_dir = os.path.dirname(ms)
         ms_basename = os.path.basename(ms).replace('.ms', '')
-        name = os.path.join(ms_dir, f"{ms_basename}wsc")
+        name = os.path.join(ms_dir, f"{ms_basename}_tswsc")
         logger.info(f"Auto-generated WSClean name: {name}")
 
     wsclean_path = config.get('general', 'wsclean_path', fallback='wsclean')
-    cmd = [wsclean_path, '-name', name]
 
-    time_interval = None
-    scan_param = None
+    cmd = [
+        wsclean_path,
+        '-name', name,
+        '-weight', 'briggs', '0.0',
+        '-super-weight', '1.0',
+        '-weighting-rank-filter-size', '16',
+        '-taper-gaussian', '0',
+        '-join-channels',
+        '-no-negative',
+        '-fit-beam',
+        '-elliptical-beam',
+    ]
 
-    for key, value in config.items(section):
-        if key in ['ms', 'name']:
-            continue
+    config_keys = {
+        'size': ',',
+        'scale': ' ',
+        'channels-out': ' ',
+        'wstack-kernel-size': ' ',
+        'wstack-oversampling': ' ',
+        'pol': ' ',
+        'data-column': ' ',
+        'niter': ' ',
+        'auto-mask': ' ',
+        'auto-threshold': ' ',
+        'gain': ' ',
+        'mgain': ' ',
+        'multiscale-scale-bias': ' ',
+        'fit-spectral-pol': ' ',
+        'padding': ' ',
+        'parallel-deconvolution': ' '
+    }
 
-        if key == 'time_interval':
-            time_interval = value.strip()
-            continue
+    for key, splitter in config_keys.items():
+        value = config.get(section, key, fallback='').strip()
+        if value:
+            cmd.append(f'-{key}')
+            cmd.extend(value.split(splitter))
 
-        if key == 'scan':
-            scan_param = value.strip()
-            continue
-
-        key_clean = key.strip().replace('_', '-')
-
-        if value.lower() in ['true', 'false']:
-            if value.lower() == 'true':
-                cmd.append(f"--{key_clean}")
-        elif value.strip() == '':
-            cmd.append(f"--{key_clean}")
-        else:
-            parts = value.split()
-            cmd.append(f"--{key_clean}")
-            cmd.extend(parts)
-
+    time_interval = config.get(section, 'time_interval', fallback='').strip()
+    scan_param = config.get(section, 'scan', fallback='').strip()
     if time_interval:
         try:
             time_interval = float(time_interval)
             total_duration = get_total_scan_duration(ms, scan_param)
-            if total_duration is not None and total_duration > 0:
+            if total_duration and total_duration > 0:
                 intervals_out = int(np.ceil(total_duration / time_interval))
                 logger.info(f"🕒 Total scan duration: {total_duration:.2f}s")
                 logger.info(f"⏱️ Time interval: {time_interval}s → Intervals-out: {intervals_out}")
-                cmd.append('--intervals-out')
-                cmd.append(str(intervals_out))
+                cmd += ['-intervals-out', str(intervals_out)]
             else:
                 logger.warning("⚠️ Could not compute intervals-out: invalid scan duration.")
         except ValueError:
@@ -98,7 +100,7 @@ def run_time_wsclean(config):
 
     cmd.append(ms)
 
-    logger.info(" Running WSClean (time series) with command:")
+    logger.info("Running WSClean (time series) with command:")
     logger.info(' '.join(cmd))
 
     try:
