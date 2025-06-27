@@ -1,5 +1,6 @@
 import subprocess
 import os
+import glob
 from modules.logger import logger
 from casacore.tables import table
 import numpy as np
@@ -12,8 +13,7 @@ def get_total_scan_duration(ms_path, scan_str=None):
         tb.close()
 
         scan_numbers = list(map(int, scan_str.strip().split())) if scan_str else sorted(set(scan_ids))
-
-        total_duration = sum(np.max(times[scan_ids == scan]) - np.min(times[scan_ids == scan]) 
+        total_duration = sum(np.max(times[scan_ids == scan]) - np.min(times[scan_ids == scan])
                              for scan in scan_numbers if len(times[scan_ids == scan]) > 0)
         return total_duration
     except Exception as e:
@@ -22,24 +22,32 @@ def get_total_scan_duration(ms_path, scan_str=None):
 
 def run_time_wsclean(config):
     section = 'wsclean_timeseries'
-
     ms = config.get(section, 'ms', fallback='').strip()
+
     if not ms:
         ms = config.get('mstransform', 'output_ms', fallback='').strip()
-        if not ms:
-            input_ms = config.get('uvsub', 'input_ms', fallback='').strip()
-            if input_ms:
-                ms = input_ms.replace('.ms', '_uvsub.ms')
 
-    if not ms or not os.path.exists(ms):
-        logger.error(f"❌ Measurement set not found or not provided: {ms}")
-        raise FileNotFoundError(f"Measurement set not found or not provided: {ms}")
+    if not ms:
+        candidates = glob.glob("*_uvsub.ms")
+        if len(candidates) == 1:
+            ms = os.path.abspath(candidates[0])
+            logger.warning(f"⚠️ No MS specified. Using detected file: {ms}")
+        elif len(candidates) > 1:
+            logger.error("❌ Multiple *_uvsub.ms files found. Please specify the correct one in config.")
+            raise RuntimeError("Ambiguous MS file. Please set it explicitly.")
+        else:
+            logger.error("❌ No *_uvsub.ms file found. Please provide an input MS in the config.")
+            raise FileNotFoundError("No MS found to run WSClean.")
+
+    if not os.path.exists(ms):
+        logger.error(f"❌ Measurement set not found: {ms}")
+        raise FileNotFoundError(f"Measurement set not found: {ms}")
 
     name = config.get(section, 'name', fallback='').strip()
     if not name:
         ms_dir = os.path.dirname(ms)
         ms_basename = os.path.basename(ms).replace('.ms', '')
-        name = os.path.join(ms_dir, f"{ms_basename}_tswsc")
+        name = os.path.join(ms_dir, f"{ms_basename}_wsc")
         logger.info(f"Auto-generated WSClean name: {name}")
 
     wsclean_path = config.get('general', 'wsclean_path', fallback='wsclean')
@@ -55,6 +63,7 @@ def run_time_wsclean(config):
         '-no-negative',
         '-fit-beam',
         '-elliptical-beam',
+        '-wstack-grid-mode', 'kb',
     ]
 
     config_keys = {
@@ -112,10 +121,8 @@ def run_time_wsclean(config):
             bufsize=1,
             cwd=os.path.dirname(ms)
         )
-
         for line in process.stdout:
             logger.info(line.strip())
-
         process.stdout.close()
         returncode = process.wait()
 
@@ -128,5 +135,5 @@ def run_time_wsclean(config):
     except FileNotFoundError:
         logger.error(f"❌ WSClean executable not found: '{wsclean_path}'. Check your config or PATH.")
     except Exception as e:
-        logger.error(f"❌ An unexpected error occurred during WSClean execution: {e}")
+        logger.error(f"❌ Unexpected error during WSClean execution: {e}")
 

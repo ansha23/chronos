@@ -38,7 +38,7 @@ print(f"✅ MSTRANSFORM created: {{output_ms}}")
     try:
         with open(script_file, "w") as f:
             f.write(casa_script)
-        logger.info(f"📄 CASA script written to: {script_file}")
+        logger.info(f"CASA script written to: {script_file}")
 
         casa_cmd = f"{casa_dir} --nogui -c {script_file}"
         logger.info(f" Executing CASA command:\n{casa_cmd}")

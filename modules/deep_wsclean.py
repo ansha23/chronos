@@ -1,6 +1,7 @@
 import os
 import subprocess
 from modules.logger import logger
+import glob
 
 def run_deep_wsclean(config):
     logger.info("📡 Starting Deep WSClean step...")
@@ -8,12 +9,21 @@ def run_deep_wsclean(config):
     section = 'wsclean_deep'
 
     ms = config.get(section, 'ms', fallback='').strip()
+
     if not ms:
-        ms = config.get('mstransform', 'output_ms', fallback='')
-        if not ms:
-            input_ms = config.get('uvsub', 'input_ms', fallback='')
-            if input_ms:
-                ms = input_ms.replace('.ms', '_uvsub.ms')
+        ms = config.get('mstransform', 'output_ms', fallback='').strip()
+
+    if not ms:
+        uvsub_candidates = glob.glob("*_uvsub.ms")
+        if len(uvsub_candidates) == 1:
+            ms = os.path.abspath(uvsub_candidates[0])
+            logger.warning(f"⚠️ No MS specified in config. Using detected file: {ms}")
+        elif len(uvsub_candidates) > 1:
+            logger.error("❌ Multiple *_uvsub.ms files found. Please specify 'ms' explicitly in the config.")
+            return
+        else:
+            logger.error("❌ No *_uvsub.ms file found in the directory. Please check your config or file location.")
+            return
 
     if not os.path.exists(ms):
         logger.error(f"❌ Measurement set not found: {ms}")
@@ -24,15 +34,13 @@ def run_deep_wsclean(config):
         ms_basename = os.path.basename(ms)
         if ms_basename.endswith('.ms'):
             ms_basename = ms_basename[:-3]
-        output_prefix = ms_basename + '_uvsubwsc'
+        output_prefix = ms_basename + '_wsc'
 
     wsclean_path = config.get('general', 'wsclean_path', fallback='wsclean')
 
     size = config.get(section, 'size')
     scale = config.get(section, 'scale')
     channels_out = config.get(section, 'channels-out')
-    kernel_size = config.get(section, 'wstack-kernel-size')
-    oversampling = config.get(section, 'wstack-oversampling')
     pol = config.get(section, 'pol')
     data_column = config.get(section, 'data-column')
     niter = config.get(section, 'niter')
@@ -40,6 +48,8 @@ def run_deep_wsclean(config):
     auto_threshold = config.get(section, 'auto-threshold')
     gain = config.get(section, 'gain')
     mgain = config.get(section, 'mgain')
+    kernel_size = config.get(section, 'wstack-kernel-size')
+    oversampling = config.get(section, 'wstack-oversampling')
     scale_bias = config.get(section, 'multiscale-scale-bias')
     spectral_pol = config.get(section, 'fit-spectral-pol')
     padding = config.get(section, 'padding')
@@ -55,10 +65,10 @@ def run_deep_wsclean(config):
         '-size', *size.split(','),
         '-scale', scale,
         '-channels-out', channels_out,
+        '-pol', pol,
         '-wstack-grid-mode', 'kb',
         '-wstack-kernel-size', kernel_size,
         '-wstack-oversampling', oversampling,
-        '-pol', pol,
         '-data-column', data_column,
         '-niter', niter,
         '-auto-mask', auto_mask,

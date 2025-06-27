@@ -32,7 +32,7 @@ def generate_lightcurves_and_detect_transients(config):
             raise FileNotFoundError("❌ No catalog file (*.pybdsf.srl.fits) found in current directory.")
 
     if not image_template:
-        image_files = sorted(glob.glob(os.path.join(search_dir, '*-image.fits')))
+        image_files = sorted(glob.glob(os.path.join(search_dir, '*-MFS-image.fits')))
         if image_files:
             logger.warning(f"⚠️ Image template not provided. Found {len(image_files)} image files ending with '-image.fits'.")
         else:
