@@ -63,14 +63,13 @@ def run_time_wsclean(config):
         '-no-negative',
         '-fit-beam',
         '-elliptical-beam',
-        '-wstack-grid-mode', 'kb',
     ]
 
     config_keys = {
         'size': ',',
         'scale': ' ',
         'channels-out': ' ',
-        'wstack-kernel-size': ' ',
+        'wstack-kernel-size':' ',
         'wstack-oversampling': ' ',
         'pol': ' ',
         'data-column': ' ',

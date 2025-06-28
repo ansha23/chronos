@@ -40,7 +40,7 @@ def generate_lightcurves_and_detect_transients(config):
 
 
     if not image_template:
-        image_files = sorted(glob.glob(os.path.join(search_dir, '*-MFS-image.fits')))
+        image_files = sorted(glob.glob(os.path.join(search_dir, '*-image.fits')))
         if image_files:
             logger.warning(f"⚠️ Image template not provided. Found {len(image_files)} image files ending with '-image.fits'.")
         else:
@@ -149,6 +149,9 @@ def generate_lightcurves_and_detect_transients(config):
             flux_errors[i_src, i_img] = error
 
     times = Time(obs_times, format='isot')
+    times_iso = times.isot
+    times_mjd = times.mjd
+
 
     flux_colnames = [f'Flux_t{i:04d}' for i in range(n_images)]
     error_colnames = [f'Error_t{i:04d}' for i in range(n_images)]
@@ -170,7 +173,9 @@ def generate_lightcurves_and_detect_transients(config):
         data_dict[flux_colnames[i]] = fluxes[:, i]
         data_dict[error_colnames[i]] = flux_errors[:, i]
         data_dict[f'RMS_t{i:04d}'] = np.full(n_sources, rms_values[i])
-
+        data_dict[f'Time_t{i:04d}_MJD'] = np.full(n_sources, times_mjd[i])
+        data_dict[f'Time_t{i:04d}_ISO'] = np.full(n_sources, times_iso[i])
+        
     scan_dir = os.getcwd()
     output_dir = lc_conf.get('output_dir', 'lightcurve_plots')
 

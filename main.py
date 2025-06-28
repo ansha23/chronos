@@ -6,33 +6,32 @@ from datetime import datetime
 from multiprocessing import Pool
 import re
 from casacore.tables import table
+import numpy as np
+import glob
 
+# Add 'modules' directory to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'modules'))
 
+# Setup logging
 os.makedirs("logs", exist_ok=True)
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 log_filename = f"logs/pipeline_{timestamp}.log"
-
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler(log_filename),
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.FileHandler(log_filename), logging.StreamHandler(sys.stdout)]
 )
-
 logger = logging.getLogger("pipeline")
 
+# Import your module functions
 from modules.uvsub_mstransform import run_uvsub_mstransform_with_casa
 from modules.deep_wsclean import run_deep_wsclean
 from modules.timeseries_wsclean import run_time_wsclean
 from modules.pybdsf_runner import run_pybdsf
 from modules.lightcurve_generator import generate_lightcurves_and_detect_transients
 from modules.scan_splitter import split_scans_with_mstransform
-from casacore.tables import table
-import numpy as np
-
+from modules.concat_lc_lombscargle import concatenate_and_analyze_lightcurves
+from modules.file_cleanup import cleanup_files
 
 def estimate_disk_usage(config):
     section = 'wsclean_timeseries'
@@ -63,9 +62,9 @@ def estimate_disk_usage(config):
         n_pol = {'I': 1, 'IQUV': 4, 'RR,LL': 2, 'XX,YY': 2}.get(pol, 1)
 
         total_images = n_intervals * chans * n_pol
-        bytes_per_img = nx * ny * 4  # WSClean outputs FITS files containing images with 32-bit floating-point, 1 byte= 8 bits, 32 bit = 4 bytes
+        bytes_per_img = nx * ny * 4
         total_bytes = total_images * bytes_per_img
-        total_gb = total_bytes / (1024 ** 3)  # 1kb = 1024 bytes, 1 GB = 1024^3 bytes
+        total_gb = total_bytes / (1024 ** 3)
 
         return total_gb
 
@@ -76,7 +75,6 @@ def estimate_disk_usage(config):
 
 def estimate_total_disk_usage(config):
     logger.info("Estimating total disk usage...")
-
     total_gb = 0.0
 
     if config.getboolean('modules', 'uvsub_mstransform', fallback=False):
@@ -101,12 +99,9 @@ def estimate_total_disk_usage(config):
         input_ms = config.get('uvsub', 'input_ms', fallback='').strip()
         if os.path.exists(input_ms):
             size_gb = os.path.getsize(input_ms) / (1024 ** 3)
-
-
             tb = table(input_ms, ack=False)
             scan_numbers = sorted(set(tb.getcol("SCAN_NUMBER")))
             tb.close()
-
             approx_scans = len(scan_numbers)
             est = size_gb * approx_scans
             total_gb += est
@@ -176,7 +171,6 @@ def main():
     config.read("config.ini")
 
     logger.info("📡 Starting radio transient pipeline")
-
     estimate_total_disk_usage(config)
 
     if config.getboolean('modules', 'uvsub_mstransform', fallback=False):
@@ -216,22 +210,34 @@ def main():
                             logger.info(f"✅ Selected scan {scan_num}: {ms_path}")
 
         ms_files.sort()
-        logger.info(f" Found {len(ms_files)} scan .ms files to process")
+        logger.info(f"Found {len(ms_files)} scan .ms files to process")
 
-        if config.has_option('general', 'max_parallel_scans'):
-            val = config.get('general', 'max_parallel_scans').strip()
-            if val:
-                max_processes = int(val)
-                logger.info(f"Using max {max_processes} parallel processes from config")
-            else:
-                max_processes = len(ms_files)
-                logger.info(f"'max_parallel_scans' is empty. Using all {max_processes} scans in parallel")
-        else:
-            max_processes = len(ms_files)
-            logger.info(f"No 'max_parallel_scans' set. Using all {max_processes} scans in parallel")
+        max_processes = config.getint('general', 'max_parallel_scans', fallback=len(ms_files))
 
         with Pool(processes=max_processes) as pool:
             pool.starmap(process_single_scan, [(os.path.abspath(ms_path),) for ms_path in ms_files])
+
+        if config.getboolean('concatenate_catalogs', 'concatenate', fallback=False):
+            logger.info("📡 Performing light curve concatenation and period analysis...")
+
+            scan_output_dirname = config.get('lightcurve_generator', 'output_dir', fallback='lightcurve_plots')
+            scan_dirs = sorted(glob.glob(f"split_ms/scan*/{os.path.basename(scan_output_dirname)}"))
+
+            valid_scan_dirs = []
+            for d in scan_dirs:
+                if glob.glob(os.path.join(d, "*ref_catalog.csv")):
+                    valid_scan_dirs.append(d)
+                else:
+                    logger.warning(f"⚠️ No ref catalog found in {d}")
+
+            if not valid_scan_dirs:
+                logger.error("❌ No valid ref_catalog.csv files found in scan directories.")
+            else:
+                scan_dirs_str = ",".join(valid_scan_dirs)
+                config.set('concatenate_catalogs', 'scan_dirs', scan_dirs_str)
+                concatenate_and_analyze_lightcurves(config)
+                
+        cleanup_files(config)
 
         logger.info("✅ Pipeline completed!")
         return
