@@ -24,12 +24,20 @@ def generate_lightcurves_and_detect_transients(config):
     image_template = lc_conf.get('image_template')
 
     if not catalog_file or not os.path.isfile(catalog_file):
-        catalog_matches = glob.glob(os.path.join(search_dir, '*.pybdsf.srl.fits'))
-        if catalog_matches:
-            catalog_file = catalog_matches[0]
+        candidates = glob.glob('./*.pybdsf.srl.fits')
+
+        if not candidates:
+            candidates = glob.glob('../*.pybdsf.srl.fits')
+
+        if not candidates:
+            candidates = glob.glob('../../*.pybdsf.srl.fits')
+
+        if candidates:
+            catalog_file = os.path.abspath(candidates[0])
             logger.warning(f"⚠️ Catalog not provided. Using detected catalog: {catalog_file}")
         else:
-            raise FileNotFoundError("❌ No catalog file (*.pybdsf.srl.fits) found in current directory.")
+            raise FileNotFoundError("❌ No catalog file (*.pybdsf.srl.fits) found in scan, parent, or root directory.")
+
 
     if not image_template:
         image_files = sorted(glob.glob(os.path.join(search_dir, '*-MFS-image.fits')))

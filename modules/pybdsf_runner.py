@@ -12,12 +12,12 @@ def run_pybdsf(config):
     if not fits_file or not os.path.exists(fits_file):
         logger.warning("⚠️ FITS image not provided or not found. Searching for fallback...")
 
-        candidates = glob.glob("*_uvsubwsc-image.fits")
+        candidates = glob.glob("*_uvsub_wsc-MFS-image.fits")
         if candidates:
             fits_file = candidates[0]
             logger.info(f"🔄 Using fallback FITS image: {fits_file}")
         else:
-            logger.error("❌ No suitable *_uvsubwsc-image.fits file found.")
+            logger.error("❌ No suitable *_uvsub_wsc-MFS-image.fits file found.")
             raise FileNotFoundError("FITS image not provided and fallback search failed.")
 
     pybdsf_script = f"""
