@@ -40,11 +40,11 @@ def generate_lightcurves_and_detect_transients(config):
 
 
     if not image_template:
-        image_files = sorted(glob.glob(os.path.join(search_dir, '*-image.fits')))
+        image_files = sorted(glob.glob(os.path.join(search_dir, '*-MFS-image.fits')))
         if image_files:
-            logger.warning(f"⚠️ Image template not provided. Found {len(image_files)} image files ending with '-image.fits'.")
+            logger.warning(f"⚠️ Image template not provided. Found {len(image_files)} image files ending with '-MFS-image.fits'.")
         else:
-            raise FileNotFoundError("❌ No image files (*-image.fits) found in current directory.")
+            raise FileNotFoundError("❌ No image files (*-MFS-image.fits) found in current directory.")
     else:
 
         image_files = [image_template.format(i) for i in range(10000)]
