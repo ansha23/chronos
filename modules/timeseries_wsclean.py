@@ -63,6 +63,7 @@ def run_time_wsclean(config):
         '-no-negative',
         '-fit-beam',
         '-elliptical-beam',
+        '-wstack-grid-mode', 'kb',
     ]
 
     config_keys = {

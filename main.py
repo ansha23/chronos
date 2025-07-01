@@ -9,10 +9,8 @@ from casacore.tables import table
 import numpy as np
 import glob
 
-# Add 'modules' directory to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'modules'))
 
-# Setup logging
 os.makedirs("logs", exist_ok=True)
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 log_filename = f"logs/pipeline_{timestamp}.log"
@@ -23,7 +21,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pipeline")
 
-# Import your module functions
 from modules.uvsub_mstransform import run_uvsub_mstransform_with_casa
 from modules.deep_wsclean import run_deep_wsclean
 from modules.timeseries_wsclean import run_time_wsclean
@@ -33,72 +30,80 @@ from modules.scan_splitter import split_scans_with_mstransform
 from modules.concat_lc_lombscargle import concatenate_and_analyze_lightcurves
 from modules.file_cleanup import cleanup_files
 
-def estimate_disk_usage(config):
-    section = 'wsclean_timeseries'
+def get_directory_size(path):
+
+    total = 0
+    for dirpath, _, filenames in os.walk(path):
+        for f in filenames:
+            try:
+                fp = os.path.join(dirpath, f)
+                if os.path.isfile(fp):
+                    total += os.path.getsize(fp)
+            except Exception as e:
+                logger.warning(f"Skipping file {fp}: {e}")
+    return total
+
+
+def estimate_disk_usage_for_scan(ms_path, config):
     try:
-        ms = config.get(section, 'ms', fallback='').strip()
-        if not ms or not os.path.exists(ms):
+        section = 'wsclean_timeseries'
+        if not os.path.exists(ms_path):
             return 0.0
 
-        nx, ny = map(int, config.get(section, 'size', fallback='8000,8000').split(','))
-        chans = int(config.get(section, 'channels-out', fallback='1'))
-        pol = config.get(section, 'pol', fallback='I').upper()
-        time_interval = float(config.get(section, 'time_interval', fallback='0'))
+        nx, ny = map(int, config.get(section, 'size').split(','))
+        chans = int(config.get(section, 'channels-out'))
+        pol = config.get(section, 'pol').upper()
+        time_interval = float(config.get(section, 'time_interval'))
 
-        tb = table(ms, ack=False)
+        tb = table(ms_path, ack=False)
         times = tb.getcol("TIME")
-        scan_ids = tb.getcol("SCAN_NUMBER")
         tb.close()
 
-        scan_str = config.get(section, 'scan', fallback='')
-        scan_numbers = list(map(int, scan_str.strip().split())) if scan_str else sorted(set(scan_ids))
-
-        total_duration = sum(
-            np.max(times[scan_ids == scan]) - np.min(times[scan_ids == scan])
-            for scan in scan_numbers if len(times[scan_ids == scan]) > 0
-        )
-
+        total_duration = np.max(times) - np.min(times)
         n_intervals = int(np.ceil(total_duration / time_interval)) if time_interval > 0 else 1
         n_pol = {'I': 1, 'IQUV': 4, 'RR,LL': 2, 'XX,YY': 2}.get(pol, 1)
 
-        total_images = n_intervals * chans * n_pol
-        bytes_per_img = nx * ny * 4
+        total_images = n_intervals * (chans * n_pol+1) * 4
+        bytes_per_img = nx * ny * 4  # float32 = 4 bytes
         total_bytes = total_images * bytes_per_img
         total_gb = total_bytes / (1024 ** 3)
 
+        logger.info(f"[{os.path.basename(ms_path)}] 🧮Estimated WSClean output: {total_images} images, ~{total_gb:.2f} GB")
         return total_gb
 
     except Exception as e:
-        logger.warning(f"⚠️ Could not estimate WSClean disk usage: {e}")
+        logger.warning(f"⚠️ Could not estimate WSClean disk usage for {ms_path}: {e}")
         return 0.0
 
 
 def estimate_total_disk_usage(config):
-    logger.info("Estimating total disk usage...")
+    logger.info("🧮Estimating total disk usage...")
+
     total_gb = 0.0
 
-    if config.getboolean('modules', 'uvsub_mstransform', fallback=False):
-        input_ms = config.get('uvsub', 'input_ms', fallback='').strip()
+    if config.getboolean('modules', 'uvsub_mstransform'):
+        input_ms = config.get('uvsub', 'input_ms').strip()
         if os.path.exists(input_ms):
-            size_gb = os.path.getsize(input_ms) / (1024 ** 3)
-            est = size_gb * 1
-            total_gb += est
-            logger.info(f"UVSUB mstransform: ~{est:.2f} GB")
+            size_bytes = get_directory_size(input_ms)
+            size_gb = size_bytes / (1024 ** 3)
+            total_gb += size_gb
+            logger.info(f"UVSUB input MS size: ~{size_gb:.2f} GB")
 
-    if config.getboolean('modules', 'deep_wsclean', fallback=False):
-        nx, ny = map(int, config.get('deep_wsclean', 'size', fallback='8000,8000').split(','))
-        chans = int(config.get('deep_wsclean', 'channels-out', fallback='4'))
-        pol = config.get('deep_wsclean', 'pol', fallback='I').upper()
+    if config.getboolean('modules', 'deep_wsclean'):
+        nx, ny = map(int, config.get('wsclean_deep', 'size').split(','))
+        chans = int(config.get('wsclean_deep', 'channels-out'))
+        pol = config.get('wsclean_deep', 'pol').upper()
         n_pol = {'I': 1, 'IQUV': 4, 'RR,LL': 2, 'XX,YY': 2}.get(pol, 1)
         bytes_per_img = nx * ny * 4
-        est = (bytes_per_img * chans * n_pol) / (1024 ** 3)
+        est = (bytes_per_img * (chans * n_pol+1)*4) / (1024 ** 3)
         total_gb += est
         logger.info(f"Deep WSClean: ~{est:.2f} GB")
 
-    if config.getboolean('general', 'split_scans', fallback=False):
-        input_ms = config.get('uvsub', 'input_ms', fallback='').strip()
+    if config.getboolean('general', 'split_scans'):
+        input_ms = config.get('uvsub', 'input_ms').strip()
         if os.path.exists(input_ms):
-            size_gb = os.path.getsize(input_ms) / (1024 ** 3)
+            size_bytes = get_directory_size(input_ms)
+            size_gb = size_bytes / (1024 ** 3)
             tb = table(input_ms, ack=False)
             scan_numbers = sorted(set(tb.getcol("SCAN_NUMBER")))
             tb.close()
@@ -107,12 +112,8 @@ def estimate_total_disk_usage(config):
             total_gb += est
             logger.info(f"Split scans: ~{est:.2f} GB")
 
-    if config.getboolean('modules', 'timeseries_wsclean', fallback=False):
-        est = estimate_disk_usage(config)
-        total_gb += est
-        logger.info(f"Time-series WSClean: ~{est:.2f} GB")
+    logger.warning(f"🧮 TOTAL ESTIMATED DISK USAGE: {total_gb:.2f} GB\n")
 
-    logger.warning(f"TOTAL ESTIMATED DISK USAGE: {total_gb:.2f} GB\n")
 
 
 def process_single_scan(ms_path, config_path="config.ini"):
@@ -153,7 +154,7 @@ def process_single_scan(ms_path, config_path="config.ini"):
         logger.info(f"[{scan_name}] Changed directory to scan folder: {os.getcwd()}")
 
         if config.getboolean('modules', 'timeseries_wsclean', fallback=False):
-            estimate_disk_usage(config)
+            estimate_disk_usage_for_scan(ms_path, config)
             run_time_wsclean(config)
 
         if config.getboolean('modules', 'lightcurve_generator', fallback=False):
