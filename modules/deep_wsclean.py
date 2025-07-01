@@ -34,7 +34,7 @@ def run_deep_wsclean(config):
         ms_basename = os.path.basename(ms)
         if ms_basename.endswith('.ms'):
             ms_basename = ms_basename[:-3]
-        output_prefix = ms_basename + '_uvsubwsc'
+        output_prefix = ms_basename + '_wsc'
 
     wsclean_path = config.get('general', 'wsclean_path', fallback='wsclean')
 
