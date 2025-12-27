@@ -1,6 +1,6 @@
 import glob
 import os
-from modules.logger import logger
+from chronos.modules.logger import logger
 
 def cleanup_files(config):
     if not config.has_section("file_cleanup"):

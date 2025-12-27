@@ -9,7 +9,7 @@ from astropy.coordinates import SkyCoord
 import astropy.units as u
 from astropy.time import Time
 from astropy.wcs.utils import proj_plane_pixel_area
-from modules.logger import logger
+from chronos.modules.logger import logger
 import glob
 import re
 

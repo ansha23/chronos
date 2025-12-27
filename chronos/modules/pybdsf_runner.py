@@ -1,7 +1,7 @@
 import subprocess
 import os
 import glob
-from modules.logger import logger
+from chronos.modules.logger import logger
 
 def run_pybdsf(config):
     logger.info("📡 Starting PyBDSF step...")

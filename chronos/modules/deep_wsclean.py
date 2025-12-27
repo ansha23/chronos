@@ -1,6 +1,6 @@
 import os
 import subprocess
-from modules.logger import logger
+from chronos.modules.logger import logger
 import glob
 
 def run_deep_wsclean(config):

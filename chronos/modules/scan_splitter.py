@@ -2,7 +2,7 @@ import os
 import glob
 import subprocess
 from casacore.tables import table
-from modules.logger import logger
+from chronos.modules.logger import logger
 
 def split_scans_with_mstransform(config):
     output_ms = config.get('mstransform', 'output_ms', fallback='').strip()

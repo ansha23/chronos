@@ -1,6 +1,6 @@
 import configparser
 import subprocess
-from modules.logger import logger
+from chronos.modules.logger import logger
 
 def run_uvsub_mstransform_with_casa(config):
     logger.info("📡 Starting CASA uvsub + mstransform step...")

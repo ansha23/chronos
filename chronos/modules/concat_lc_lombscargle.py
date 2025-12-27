@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from astropy.timeseries import LombScargle
-from modules.logger import logger
+from chronos.modules.logger import logger
 
 def concatenate_and_analyze_lightcurves(config):
     concat_conf = config['concatenate_catalogs']

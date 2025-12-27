@@ -21,14 +21,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pipeline")
 
-from modules.uvsub_mstransform import run_uvsub_mstransform_with_casa
-from modules.deep_wsclean import run_deep_wsclean
-from modules.timeseries_wsclean import run_time_wsclean
-from modules.pybdsf_runner import run_pybdsf
-from modules.lightcurve_generator import generate_lightcurves_and_detect_transients
-from modules.scan_splitter import split_scans_with_mstransform
-from modules.concat_lc_lombscargle import concatenate_and_analyze_lightcurves
-from modules.file_cleanup import cleanup_files
+from chronos.modules.uvsub_mstransform import run_uvsub_mstransform_with_casa
+from chronos.modules.deep_wsclean import run_deep_wsclean
+from chronos.modules.timeseries_wsclean import run_time_wsclean
+from chronos.modules.pybdsf_runner import run_pybdsf
+from chronos.modules.lightcurve_generator import generate_lightcurves_and_detect_transients
+from chronos.modules.scan_splitter import split_scans_with_mstransform
+from chronos.modules.concat_lc_lombscargle import concatenate_and_analyze_lightcurves
+from chronos.modules.file_cleanup import cleanup_files
 
 def get_directory_size(path):
 

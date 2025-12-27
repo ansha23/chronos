@@ -1,7 +1,7 @@
 import subprocess
 import os
 import glob
-from modules.logger import logger
+from chronos.modules.logger import logger
 from casacore.tables import table
 import numpy as np
 
