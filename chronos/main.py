@@ -9,7 +9,6 @@ from casacore.tables import table
 import numpy as np
 import glob
 
-sys.path.append(os.path.join(os.path.dirname(__file__), 'modules'))
 
 os.makedirs("logs", exist_ok=True)
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -116,7 +115,8 @@ def estimate_total_disk_usage(config):
 
 
 
-def process_single_scan(ms_path, config_path="config.ini"):
+def process_single_scan(ms_path, config_path):
+
     config = configparser.ConfigParser()
     config.read(config_path)
 
@@ -168,8 +168,20 @@ def process_single_scan(ms_path, config_path="config.ini"):
 
 
 def main():
+    import sys
+
+    if len(sys.argv) < 2:
+        print("Usage: chronos <config.ini>")
+        sys.exit(1)
+
+    config_path = sys.argv[1]
+
+    if not os.path.exists(config_path):
+        print(f"❌ Config file not found: {config_path}")
+        sys.exit(1)
+
     config = configparser.ConfigParser()
-    config.read("config.ini")
+    config.read(config_path)
 
     logger.info("📡 Starting radio transient pipeline")
     estimate_total_disk_usage(config)
@@ -216,7 +228,7 @@ def main():
         max_processes = config.getint('general', 'max_parallel_scans', fallback=len(ms_files))
 
         with Pool(processes=max_processes) as pool:
-            pool.starmap(process_single_scan, [(os.path.abspath(ms_path),) for ms_path in ms_files])
+            pool.starmap(process_single_scan, [(os.path.abspath(ms_path), config_path) for ms_path in ms_files])
 
         if config.getboolean('concatenate_catalogs', 'concatenate', fallback=False):
             logger.info("📡 Performing light curve concatenation and period analysis...")
@@ -249,4 +261,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
