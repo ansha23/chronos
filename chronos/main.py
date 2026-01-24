@@ -9,6 +9,7 @@ from casacore.tables import table
 import numpy as np
 import glob
 
+sys.path.append(os.path.join(os.path.dirname(__file__), 'modules'))
 
 os.makedirs("logs", exist_ok=True)
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -20,14 +21,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pipeline")
 
-from chronos.modules.uvsub_mstransform import run_uvsub_mstransform_with_casa
-from chronos.modules.deep_wsclean import run_deep_wsclean
-from chronos.modules.timeseries_wsclean import run_time_wsclean
-from chronos.modules.pybdsf_runner import run_pybdsf
-from chronos.modules.lightcurve_generator import generate_lightcurves_and_detect_transients
-from chronos.modules.scan_splitter import split_scans_with_mstransform
-from chronos.modules.concat_lc_lombscargle import concatenate_and_analyze_lightcurves
-from chronos.modules.file_cleanup import cleanup_files
+from modules.uvsub_mstransform import run_uvsub_mstransform_with_casa
+from modules.deep_wsclean import run_deep_wsclean
+from modules.timeseries_wsclean import run_time_wsclean
+from modules.pybdsf_runner import run_pybdsf
+from modules.scan_splitter import split_scans_with_mstransform
+from modules.concat_lc_lombscargle import analyze_lightcurve_csv
+from modules.file_cleanup import cleanup_files
+# Import the lightcurve module directly
+from modules import lightcurve
 
 def get_directory_size(path):
 
@@ -113,77 +115,203 @@ def estimate_total_disk_usage(config):
 
     logger.warning(f"🧮 TOTAL ESTIMATED DISK USAGE: {total_gb:.2f} GB\n")
 
-
-
-def process_single_scan(ms_path, config_path):
-
+def process_single_scan(ms_path, config_path="config.ini"):
     config = configparser.ConfigParser()
     config.read(config_path)
-
+    
     base_name = os.path.basename(ms_path).replace('.ms', '')
     ms_dir = os.path.dirname(ms_path)
     scan_name = os.path.basename(ms_dir)
-
+    
+    # Update config paths for wsclean
     config.set('wsclean_timeseries', 'ms', ms_path)
     config.set('wsclean_timeseries', 'name', base_name + "_wsc")
-
-    output_dir = config.get('lightcurve_generator', 'output_dir', fallback='lightcurve_plots')
-    transient_dir = config.get('lightcurve_generator', 'transient_plot_dir', fallback='transient_detection_plots')
-
+    
+    # Get output directories from lightcurve section
+    output_dir = config.get('lightcurve', 'output_dir', fallback='lightcurve_output')
+    transient_dir = config.get('lightcurve', 'transient_plot_dir', fallback='transient_plots')
+    
     logger.info(f"[{scan_name}] Starting scan pipeline for: {ms_path}")
     logger.info(f"[{scan_name}] Light curve plots will be saved in: {output_dir}")
     logger.info(f"[{scan_name}] Transient plots will be saved in: {transient_dir}")
-
-    if not config.has_option('lightcurve_generator', 'catalog_file'):
-        logger.info(f"[{scan_name}] Catalog file not specified in config. Searching for *.srl.fits...")
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        candidates = [f for f in os.listdir(script_dir) if f.endswith('.srl.fits')]
-        if not candidates:
-            logger.error(f"[{scan_name}] ❌ No catalog file (*.srl.fits) found in: {script_dir}")
+    
+    # Auto-find catalog file if not specified
+    if not config.has_option('lightcurve', 'catalog_file') or not config.get('lightcurve', 'catalog_file'):
+        logger.info(f"[{scan_name}] Catalog file not specified in config. Searching for *.pybdsf.srl.fits...")
+        
+        # Search for catalog files
+        catalog_candidates = []
+        search_locations = [
+            ms_dir,  # Current scan directory
+            os.path.join(ms_dir, '..'),  # Parent directory
+            os.path.join(ms_dir, '../..'),  # Grandparent directory
+            os.getcwd(),  # Current working directory
+        ]
+        
+        for location in search_locations:
+            if os.path.exists(location):
+                # Look for pybdsf catalog files
+                pattern = os.path.join(location, '*.pybdsf.srl.fits')
+                found = glob.glob(pattern)
+                if found:
+                    catalog_candidates.extend(found)
+                
+                # Also look for generic srl.fits
+                pattern2 = os.path.join(location, '*.srl.fits')
+                found2 = glob.glob(pattern2)
+                if found2:
+                    catalog_candidates.extend(found2)
+        
+        if catalog_candidates:
+            # Take the first found catalog
+            catalog_path = os.path.abspath(catalog_candidates[0])
+            logger.info(f"[{scan_name}] ✅ Found catalog file: {catalog_path}")
+            
+            # Update the config for this run
+            if not config.has_section('lightcurve'):
+                config.add_section('lightcurve')
+            config.set('lightcurve', 'catalog_file', catalog_path)
+            
+            # Write updated config to a temporary file
+            temp_config_path = os.path.join(ms_dir, 'temp_config.ini')
+            with open(temp_config_path, 'w') as f:
+                config.write(f)
+            config_path = temp_config_path
+        else:
+            logger.error(f"[{scan_name}] ❌ No catalog file (*.pybdsf.srl.fits) found in search paths")
             return
-        catalog_path = os.path.abspath(os.path.join(script_dir, candidates[0]))
-        logger.info(f"[{scan_name}] ✅ Found catalog file: {catalog_path}")
-        config.set('lightcurve_generator', 'catalog_file', catalog_path)
-        os.environ["CATALOG_FILE"] = catalog_path
     else:
-        logger.info(f"[{scan_name}] ✅ Using catalog file from config: {config.get('lightcurve_generator', 'catalog_file')}")
-
+        logger.info(f"[{scan_name}] ✅ Using catalog file from config: {config.get('lightcurve', 'catalog_file')}")
+    
     cwd = os.getcwd()
     try:
         os.chdir(ms_dir)
         logger.info(f"[{scan_name}] Changed directory to scan folder: {os.getcwd()}")
-
+        
+        # Run timeseries wsclean if enabled
         if config.getboolean('modules', 'timeseries_wsclean', fallback=False):
             estimate_disk_usage_for_scan(ms_path, config)
             run_time_wsclean(config)
+        
+        # Run lightcurve pipeline if enabled
+        if config.getboolean('modules', 'lightcurve', fallback=False):
+            logger.info(f"[{scan_name}] 🚀 Running lightcurve pipeline...")
+            
+            # Call the lightcurve module's main function directly
+            try:
+                lightcurve.main()
+                logger.info(f"[{scan_name}] ✅ Lightcurve pipeline completed successfully")
+            except Exception as e:
+                logger.error(f"[{scan_name}] ❌ Error in lightcurve pipeline: {e}")
 
-        if config.getboolean('modules', 'lightcurve_generator', fallback=False):
-            generate_lightcurves_and_detect_transients(config)
+        # --------------------------------------------------
+        # Run Lomb–Scargle period analysis (POST lightcurve)
+        # --------------------------------------------------
+        if config.has_section("lombscargle"):
+            if config.getboolean("lombscargle", "create_plots", fallback=True):
 
+                lc_outdir = config.get("lightcurve", "output_dir")
+                csv_candidates = glob.glob(
+                    os.path.join(lc_outdir, "*lightcurves.csv")
+                )
+
+                if not csv_candidates:
+                    logger.warning(
+                        f"[{scan_name}] ⚠️ No lightcurve CSV found for Lomb–Scargle"
+                    )
+                else:
+                    lc_csv = csv_candidates[0]
+
+                    ls_outdir = config.get(
+                        "lombscargle", "output_dir",
+                        fallback="lombscargle_analysis"
+                    )
+                    min_points = config.getint(
+                        "lombscargle", "min_points", fallback=5
+                    )
+
+                    logger.info(
+                        f"[{scan_name}] 🔁 Running Lomb–Scargle analysis on {lc_csv}"
+                    )
+
+                    try:
+                        analyze_lightcurve_csv(
+                            lightcurve_csv=lc_csv,
+                            output_dir=ls_outdir,
+                            min_points=min_points,
+                            make_plots=True
+                        )
+                        logger.info(
+                            f"[{scan_name}] ✅ Lomb–Scargle analysis completed"
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"[{scan_name}] ❌ Lomb–Scargle failed: {e}"
+                        )
+
+                import traceback
+                traceback.print_exc()
+        
         logger.info(f"[{scan_name}] ✅ Completed scan pipeline for: {ms_path}")
     except Exception as e:
         logger.error(f"[{scan_name}] ❌ Error while processing {ms_path}: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
+        # Clean up temporary config file
+        temp_config_path = os.path.join(ms_dir, 'temp_config.ini')
+        if os.path.exists(temp_config_path):
+            os.remove(temp_config_path)
+        
+        # Return to original directory
         os.chdir(cwd)
 
-
-def main():
-    import sys
-
-    if len(sys.argv) < 2:
-        print("Usage: chronos <config.ini>")
-        sys.exit(1)
-
-    config_path = sys.argv[1]
-
-    if not os.path.exists(config_path):
-        print(f"❌ Config file not found: {config_path}")
-        sys.exit(1)
-
+def run_standalone_lightcurve(config_path="config.ini"):
+    """
+    Run lightcurve pipeline as a standalone process (not scan-based).
+    This is useful when you have images in a specific directory.
+    """
     config = configparser.ConfigParser()
     config.read(config_path)
+    
+    logger.info("🚀 Running standalone lightcurve pipeline...")
+    
+    # Check if input_dir is specified
+    if not config.has_option('lightcurve', 'input_dir') or not config.get('lightcurve', 'input_dir'):
+        logger.warning("⚠️ No input_dir specified in [lightcurve] section.")
+        logger.info("💡 Please add 'input_dir' to [lightcurve] section in config.ini")
+        logger.info("💡 Example: input_dir = /path/to/your/images")
+        return
+    
+    # Call lightcurve module directly
+    try:
+        lightcurve.main()
+        logger.info("✅ Standalone lightcurve pipeline completed successfully")
+    except Exception as e:
+        logger.error(f"❌ Error in standalone lightcurve pipeline: {e}")
+        import traceback
+        traceback.print_exc()
+
+def main():
+    config = configparser.ConfigParser()
+    config.read("config.ini")
 
     logger.info("📡 Starting radio transient pipeline")
+    
+    # Check if we're running standalone lightcurve or full pipeline
+    run_standalone = False
+    
+    # If lightcurve is enabled but no other modules, run standalone
+    if (config.getboolean('modules', 'lightcurve', fallback=False) and 
+        not config.getboolean('modules', 'uvsub_mstransform', fallback=False) and
+        not config.getboolean('modules', 'deep_wsclean', fallback=False) and
+        not config.getboolean('modules', 'timeseries_wsclean', fallback=False) and
+        not config.getboolean('general', 'split_scans', fallback=False)):
+        logger.info("📡 Running standalone lightcurve pipeline (no scan splitting)")
+        run_standalone_lightcurve()
+        return
+    
+    # Otherwise run full pipeline
     estimate_total_disk_usage(config)
 
     if config.getboolean('modules', 'uvsub_mstransform', fallback=False):
@@ -228,12 +356,12 @@ def main():
         max_processes = config.getint('general', 'max_parallel_scans', fallback=len(ms_files))
 
         with Pool(processes=max_processes) as pool:
-            pool.starmap(process_single_scan, [(os.path.abspath(ms_path), config_path) for ms_path in ms_files])
+            pool.starmap(process_single_scan, [(os.path.abspath(ms_path),) for ms_path in ms_files])
 
         if config.getboolean('concatenate_catalogs', 'concatenate', fallback=False):
             logger.info("📡 Performing light curve concatenation and period analysis...")
 
-            scan_output_dirname = config.get('lightcurve_generator', 'output_dir', fallback='lightcurve_plots')
+            scan_output_dirname = config.get('lightcurve', 'output_dir', fallback='lightcurve_plots')
             scan_dirs = sorted(glob.glob(f"split_ms/scan*/{os.path.basename(scan_output_dirname)}"))
 
             valid_scan_dirs = []
